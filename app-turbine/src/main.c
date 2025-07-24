@@ -51,7 +51,7 @@ int main(void)
     
         }
     }
-    struct sensor_value bmi160_sample_rate;
+    /*struct sensor_value bmi160_sample_rate;
     sensor_attr_get(bmi160, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SAMPLING_FREQUENCY, &bmi160_sample_rate);
     LOG_DBG("BMI160 SR %d.%d", bmi160_sample_rate.val1, bmi160_sample_rate.val2);
     bmi160_sample_rate.val1 = 1600; bmi160_sample_rate.val2 = 0;
@@ -63,7 +63,7 @@ int main(void)
         }
     }
     sensor_attr_get(bmi160, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SAMPLING_FREQUENCY, &bmi160_sample_rate);
-    LOG_DBG("BMI160 SR %d.%d", bmi160_sample_rate.val1, bmi160_sample_rate.val2);
+    LOG_DBG("BMI160 SR %d.%d", bmi160_sample_rate.val1, bmi160_sample_rate.val2);*/
 
     LOG_DBG("Reading BMI160");
 
