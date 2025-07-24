@@ -102,3 +102,15 @@ endchoice
 config LORAWAN_JOIN_PACKET
 	bool "Join data in the buffer to make the most of a packet size"
 	default n
+
+mainmenu "Bluetooth: Peripheral HT"
+
+if HAS_HW_NRF_TEMP
+
+config SENSOR
+	default y
+
+config TEMP_NRF5
+	default y
+
+endif # HAS_HW_NRF_TEMP

@@ -23,6 +23,7 @@ target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_sources(app PRIVATE 
                     src/main.c
+                    src/hts.c
                     src/communication/comm_interface.c
                     src/communication/uart/uart_interface.c
                     src/integration/data_buffer/buffer_service.c
