@@ -1,9 +1,6 @@
 #include <zephyr/logging/log.h>
 
-#include <sensors/sensors_interface.h>
-#include <integration/data_abstraction/abstraction_service.h>
-#include <communication/comm_interface.h>
-#include <sensors/bmi160/bmi160_service.h>
+#include <zephyr/drivers/sensor.h>
 
 #include <zephyr/types.h>
 #include <stddef.h>
@@ -26,6 +23,13 @@
 LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 
 static const struct device *bmi160;
+
+typedef struct
+{
+    struct sensor_value acceleration[3];
+    struct sensor_value rotation[3];
+    uint32_t timestamp;
+} SensorModelBMI160;
 
 typedef struct
 {
