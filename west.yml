@@ -13,12 +13,12 @@ manifest:
   projects:
     - name: zephyr
       remote: caninos
-      revision: main
+      revision: 93cb2c2c5344641cf66b05390f8e1aea0e4658fc
       import:
         # By using name-allowlist we can clone only the modules that are
         # strictly needed by the application.
         name-allowlist:
-          - cmsis_6      # required by the ARM port
+          - cmsis      # required by the ARM port
           - hal_nordic # required by the custom_plank board (Nordic based)
           
     - name: loramac-node
