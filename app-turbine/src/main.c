@@ -67,91 +67,81 @@ static int init_bmi160()
     return 0;
 }
 
+static uint8_t indicate_htm;
 static uint8_t indicating;
 static struct bt_gatt_indicate_params ind_params;
+
+#define READINGS_PER_INDICATE 4
+
+int indicate_index;
 
 static void htmc_ccc_cfg_changed(const struct bt_gatt_attr *attr,
 				 uint16_t value)
 {
-	simulate_htm = (value == BT_GATT_CCC_INDICATE) ? 1 : 0;
+	indicate_htm = (value == BT_GATT_CCC_INDICATE) ? 1 : 0;
+    LOG_DBG("ccc_indicate %s\n", indicate_htm == 0U ? "disabled" : "enabled");
 }
 
 static void indicate_cb(struct bt_conn *conn,
 			struct bt_gatt_indicate_params *params, uint8_t err)
 {
-	printk("Indication %s\n", err != 0U ? "fail" : "success");
+	LOG_DBG("Indication %s\n", err != 0U ? "fail" : "success");
 }
 
 static void indicate_destroy(struct bt_gatt_indicate_params *params)
 {
-	printk("Indication complete\n");
+	LOG_DBG("Indication complete\n");
 	indicating = 0U;
+    indicate_index++;
 }
+
+#define TURBINE_SVC_UUID                 BT_UUID_128_ENCODE(0x02b454b7, 0xc19f, 0x4d1c, 0xa2c0, 0xb7fc10f8a8a3)
+#define TURBINE_CHR_IND_ACCEL_UUID      BT_UUID_128_ENCODE(0x682d75cf, 0x44fc, 0x4df4, 0xac81, 0x00f02aa9b98a)
+
+static const struct bt_uuid_128 turb_svc = BT_UUID_INIT_128(TURBINE_SVC_UUID);
+static const struct bt_uuid_128 turb_char_ind_accel_uuid = BT_UUID_INIT_128(TURBINE_CHR_IND_ACCEL_UUID);
+
 
 /* Health Thermometer Service Declaration */
 BT_GATT_SERVICE_DEFINE(hts_svc,
-	BT_GATT_PRIMARY_SERVICE(BT_UUID_HTS),
-	BT_GATT_CHARACTERISTIC(BT_UUID_HTS_MEASUREMENT, BT_GATT_CHRC_INDICATE,
+	BT_GATT_PRIMARY_SERVICE(&turb_svc),
+	BT_GATT_CHARACTERISTIC(&turb_char_ind_accel_uuid, BT_GATT_CHRC_INDICATE,
 			       BT_GATT_PERM_NONE, NULL, NULL, NULL),
-	BT_GATT_CCC(htmc_ccc_cfg_changed,
+    BT_GATT_CCC(htmc_ccc_cfg_changed,
 		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
 void hts_indicate(void)
 {
-	if (simulate_htm) {
-		static uint8_t htm[5];
-		static double temperature = 20U;
-		uint32_t mantissa;
-		uint8_t exponent;
-		int r;
+    if(indicate_htm){
+        while(indicate_index < MAX_READINGS/READINGS_PER_INDICATE){
+            
+            if (indicating) {
+                k_sleep(K_MSEC(60));;
+            }
 
-		if (indicating) {
-			return;
-		}
+            static uint8_t indicate_payload[1+6*READINGS_PER_INDICATE];
 
-		if (!temp_dev) {
-			temperature++;
-			if (temperature == 30U) {
-				temperature = 20U;
-			}
+            indicate_payload[0] = indicate_index;
+            
+            for(int i = 0; i < READINGS_PER_INDICATE; i++){
+                indicate_payload[1 + 6*i] = readings_buffer[indicate_index*READINGS_PER_INDICATE + i].X_axis;
+                indicate_payload[3 + 6*i] = readings_buffer[indicate_index*READINGS_PER_INDICATE + i].Y_axis;
+                indicate_payload[5 + 6*i] = readings_buffer[indicate_index*READINGS_PER_INDICATE + i].Z_axis;
+            }
 
-			goto gatt_indicate;
-		}
+            ind_params.attr = &hts_svc.attrs[2];
+            ind_params.func = indicate_cb;
+            ind_params.destroy = indicate_destroy;
+            ind_params.data = &indicate_payload;
+            ind_params.len = sizeof(indicate_payload);
 
-		r = sensor_sample_fetch(temp_dev);
-		if (r) {
-			printk("sensor_sample_fetch failed return: %d\n", r);
-		}
-
-		r = sensor_channel_get(temp_dev, SENSOR_CHAN_DIE_TEMP,
-				       &temp_value);
-		if (r) {
-			printk("sensor_channel_get failed return: %d\n", r);
-		}
-
-		temperature = sensor_value_to_double(&temp_value);
-
-gatt_indicate:
-		printf("temperature is %gC\n", temperature);
-
-		mantissa = (uint32_t)(temperature * 100);
-		exponent = (uint8_t)-2;
-
-		htm[0] = 0; /* temperature in celsius */
-		sys_put_le24(mantissa, (uint8_t *)&htm[1]);
-		htm[4] = exponent;
-
-		ind_params.attr = &hts_svc.attrs[2];
-		ind_params.func = indicate_cb;
-		ind_params.destroy = indicate_destroy;
-		ind_params.data = &htm;
-		ind_params.len = sizeof(htm);
-
-		if (bt_gatt_indicate(NULL, &ind_params) == 0) {
-			indicating = 1U;
-		}
-	}
+            if (bt_gatt_indicate(NULL, &ind_params) == 0) {
+                indicating = 1U;
+            }
+        }
+        indicate_index = 0;
+    }
 }
 
 
@@ -160,7 +150,7 @@ static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
 	BT_DATA_BYTES(BT_DATA_UUID16_ALL,
 		      BT_UUID_16_ENCODE(BT_UUID_HTS_VAL),
-		      BT_UUID_16_ENCODE(BT_UUID_DIS_VAL),
+		      BT_UUID_16_ENCODE(BT_UUID_DIS_VAL)),
 };
 
 static const struct bt_data sd[] = {
@@ -170,15 +160,15 @@ static const struct bt_data sd[] = {
 static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
-		printk("Connection failed, err 0x%02x %s\n", err, bt_hci_err_to_str(err));
+		LOG_ERR("Connection failed, err 0x%02x %s\n", err, bt_hci_err_to_str(err));
 	} else {
-		printk("Connected\n");
+		LOG_DBG("Connected\n");
 	}
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
-	printk("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
+	LOG_DBG("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
@@ -190,15 +180,15 @@ static void bt_ready(void)
 {
 	int err;
 
-	printk("Bluetooth initialized\n");
+	LOG_DBG("Bluetooth initialized\n");
 
 	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
-		printk("Advertising failed to start (err %d)\n", err);
+		LOG_ERR("Advertising failed to start (err %d)\n", err);
 		return;
 	}
 
-	printk("Advertising successfully started\n");
+	LOG_DBG("Advertising successfully started\n");
 }
 
 int main(void)
@@ -219,6 +209,8 @@ int main(void)
 	}
 
     bt_ready();
+
+    //LOG_DBG("BLE MTU: %d", BLE_ATT_MTU_MAX);
 
     LOG_DBG("Reading BMI160");
 
@@ -249,9 +241,9 @@ sample_fetch:
             goto sample_fetch;
         }
 
-        readings_buffer[write_index].X_axis = bmi160_model.acceleration[0].val1 * 1e6 + bmi160_model.acceleration[0].val2;
-        readings_buffer[write_index].Y_axis = bmi160_model.acceleration[1].val1 * 1e6 + bmi160_model.acceleration[1].val2;
-        readings_buffer[write_index].Z_axis = bmi160_model.acceleration[2].val1 * 1e6 + bmi160_model.acceleration[2].val2;
+        readings_buffer[write_index].X_axis = bmi160_model.acceleration[0].val1 * 1e3 + bmi160_model.acceleration[0].val2 / 1e3;
+        readings_buffer[write_index].Y_axis = bmi160_model.acceleration[1].val1 * 1e3 + bmi160_model.acceleration[1].val2 / 1e3;
+        readings_buffer[write_index].Z_axis = bmi160_model.acceleration[2].val1 * 1e3 + bmi160_model.acceleration[2].val2 / 1e3;
 
         write_index++;
 
@@ -262,10 +254,7 @@ sample_fetch:
             time_aux_main = k_uptime_get();
 
             hts_indicate();
-
-            /* Battery level simulation */
-            bas_notify();
-        }*/
+        }
 
         /*for (int i = 0; i < MAX_READINGS; i++)
         {
