@@ -26,10 +26,10 @@ LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 
 /* Macros for frames to be read */
 
-#define ACC_FRAMES 10 /* 40 Frames are available every 25ms @ 1600 Hz */
-/* 40 frames containing a 1 byte header, 6 bytes of accelerometer,
+#define ACC_FRAMES 50 /* 40 Frames are available every 25ms @ 1600 Hz */
+/* 50 frames containing a 1 byte header, 6 bytes of accelerometer,
  * This results in 7 bytes per frame*/
-#define FIFO_SIZE 70
+#define FIFO_SIZE 350
 
 /* Variable declarations */
 struct bmi160_dev bmi;
@@ -39,14 +39,6 @@ struct bmi160_fifo_frame fifo_frame;
 struct bmi160_sensor_data accel_data[ACC_FRAMES];
 
 int8_t rslt;
-
-// typedef struct
-// {
-//     int16_t accelerometerX;
-//     int16_t accelerometerY;
-//     int16_t accelerometerZ;
-//     uint16_t dummy;
-// } reading_t;
 
 typedef struct
 {
@@ -87,15 +79,9 @@ struct bmi160_cfg_i2c {
 	const struct bmi160_bus_io *bus_io;
 };
 
-bool user_bus_ready_i2c()
-{
-    const struct bmi160_cfg_i2c *cfg = dev->config;
-	return device_is_ready(&cfg->bus.i2c.bus);
-}
-
 int8_t user_i2c_read(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t len)
 {
-    // printf("i2c_read_regs(%d, %x, %x, ...)\n", dev, dev_addr, reg_addr);
+    // LOG_DBG("i2c_read_regs(%d, %x, %x, ...)\n", dev, dev_addr, reg_addr);
     const struct bmi160_cfg_i2c *cfg = dev->config;
 
 	return i2c_burst_read_dt(&cfg->bus.i2c, reg_addr, data, len);
@@ -103,7 +89,7 @@ int8_t user_i2c_read(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t
 
 int8_t user_i2c_write(uint8_t dev_addr, uint8_t reg_addr, uint8_t *data, uint16_t len)
 {
-    // printf("i2c_write_regs(%d, %x, %x, ...)\n", dev, dev_addr, reg_addr);
+    // LOG_DBG("i2c_write_regs(%d, %x, %x, ...)\n", dev, dev_addr, reg_addr);
     const struct bmi160_cfg_i2c *cfg = dev->config;
 
 	return i2c_burst_write_dt(&cfg->bus.i2c, reg_addr, data, len);
@@ -115,9 +101,9 @@ void user_delay(uint32_t period)
 }
 
 /* accel params and conversion constants */
-// #define AC 2048.0 // for 16G
-#define AC 8192.0 // for 4G
-// #define AC 16384.0 // for 2G
+// #define AC (float)2048.0 // for 16G
+#define AC (float)8192.0 // for 4G
+// #define AC (float)16384.0 // for 2G
 
 #define STR_ANSWER_BUFFER_SIZE 4096
 
@@ -131,8 +117,8 @@ int main(void)
 
     if (rslt != BMI160_OK)
         {
-            printf("Error flushing BMI160 FIFO - %d\n \r", rslt);
-            return 0;
+            LOG_DBG("Error init BMI160 - %d\n \r", rslt);
+            goto out_error;
         }
     
     k_sleep(K_MSEC(500));
@@ -143,20 +129,20 @@ int main(void)
         rslt = bmi160_set_fifo_flush(&bmi);
         if (rslt != BMI160_OK)
         {
-            printf("Error flushing BMI160 FIFO - %d\n \r", rslt);
-            return 0;
+            LOG_DBG("Error flushing BMI160 FIFO - %d\n \r", rslt);
+            goto out_error;
         }
-        printf("flush ok");
+        LOG_DBG("flush ok");
         t1 = k_uptime_get();
         rslt = acquire_ACC_Values();
         t2 = k_uptime_get();
-        printf("time: %d \n", (int)(t2 - t1) / 1000);
-        direct_read();
+        //direct_read();
+        LOG_DBG("time: %d \n\r", t2 - t1);
     }
 out_error:
     while (1)
     {
-    printf("Error \n \r");
+    LOG_DBG("Error \n \r");
     k_sleep(K_MSEC(500));
     }
 }
@@ -177,11 +163,11 @@ int8_t init_bmiSensor(void)
         return -EAGAIN;
     }
 
-    while (!user_bus_ready_i2c())  k_sleep(K_MSEC(5));
 
-    /* Initialize your host interface to the BMI160 */
+    k_sleep(K_MSEC(500));
 
-    /* This example uses I2C as the host interface */
+    /* Initialize I2C as the host interface to the BMI160 */
+
     bmi.id = BMI160_I2C_ADDR;
     bmi.read = user_i2c_read;
     bmi.write = user_i2c_write;
@@ -191,16 +177,16 @@ int8_t init_bmiSensor(void)
     rslt = bmi160_init_i2c(&bmi);
     if (rslt == BMI160_OK)
     {
-        printf("Success initializing BMI160 - Chip ID 0x%X\n \r", bmi.chip_id);
+        LOG_DBG("Success initializing BMI160 - Chip ID 0x%X\n \r", bmi.chip_id);
     }
     else if (rslt == BMI160_E_DEV_NOT_FOUND)
     {
-        printf("Error initializing BMI160: device not found\n \r");
+        LOG_DBG("Error initializing BMI160: device not found\n \r");
         return rslt;
     }
     else
     {
-        printf("Error initializing BMI160 - %d\n \r", rslt);
+        LOG_DBG("Error initializing BMI160 - %d\n \r", rslt);
         return rslt;
     }
 
@@ -208,51 +194,46 @@ int8_t init_bmiSensor(void)
     bmi.accel_cfg.odr = BMI160_ACCEL_ODR_1600HZ;
     bmi.accel_cfg.range = BMI160_ACCEL_RANGE_4G;
     // bmi.accel_cfg.range = BMI160_ACCEL_RANGE_2G;
-    //bmi.accel_cfg.bw = BMI160_ACCEL_BW_NORMAL_AVG4;
 
-    /* Select the power mode of accelerometer sensor */
+    /* Normal power mode for accelerometer */
     bmi.accel_cfg.power = BMI160_ACCEL_NORMAL_MODE;
 
-    /* Select the Output data rate, range of Gyroscope sensor */
-    // bmi.gyro_cfg.odr = BMI160_GYRO_ODR_3200HZ;
-    // bmi.gyro_cfg.range = BMI160_GYRO_RANGE_2000_DPS;
-    //  bmi.gyro_cfg.range = BMI160_GYRO_RANGE_250_DPS;
-    // bmi.gyro_cfg.bw = BMI160_GYRO_BW_NORMAL_MODE;
-
-    /* Select the power mode of Gyroscope sensor */
+    /* Suspend power mode for Gyroscope */
     bmi.gyro_cfg.power = BMI160_GYRO_SUSPEND_MODE;
 
     /* Set the sensor configuration */
     rslt = bmi160_set_sens_conf(&bmi);
     if (rslt != BMI160_OK)
     {
-        printf("Error configuring BMI160 - %d\n \r", rslt);
+        LOG_DBG("Error configuring BMI160 - %d\n \r", rslt);
         return rslt;
     }
     
-    printf("config \n \r");
+    LOG_DBG("config \n \r");
     
     /* Link the FIFO memory location */
     fifo_frame.data = fifo_buff;
     fifo_frame.length = FIFO_SIZE;
     bmi.fifo = &fifo_frame;
+
     /* Clear all existing FIFO configurations */
     rslt = bmi160_set_fifo_config(BMI160_FIFO_CONFIG_1_MASK, BMI160_DISABLE, &bmi);
     if (rslt != BMI160_OK)
     {
-        printf("Error clearing fifo - %d\n \r", rslt);
+        LOG_DBG("Error clearing fifo - %d\n \r", rslt);
         return rslt;
     }
-    printf("clear \n \r");
+    LOG_DBG("clear \n \r");
     uint8_t fifo_config = BMI160_FIFO_HEADER | BMI160_FIFO_ACCEL;
     rslt = bmi160_set_fifo_config(fifo_config, BMI160_ENABLE, &bmi);
     if (rslt != BMI160_OK)
     {
-        printf("Error enabling fifo - %d\n \r", rslt);
+        LOG_DBG("Error enabling fifo - %d\n \r", rslt);
         return rslt;
     }
-    printf("enable \n \r");
-    /* Check rslt for any error codes */
+    LOG_DBG("enable \n \r");
+
+    return BMI160_OK;
 }
 
 int8_t acquire_ACC_Values(void)
@@ -262,11 +243,11 @@ int8_t acquire_ACC_Values(void)
          * call to bmi160_get_fifo_data(), the bmi.fifo->length contains the
          * number of bytes read from the FIFO */
         bmi.fifo->length = FIFO_SIZE;
-        while (!user_bus_ready_i2c())  k_sleep(K_MSEC(5));
+        
         rslt = bmi160_get_fifo_data(&bmi);
         if (rslt != BMI160_OK)
         {
-            printf("Error getting fifo data - %d\n \r", rslt);
+            LOG_DBG("Error getting fifo data - %d\n \r", rslt);
             return rslt;
         }
 
@@ -274,7 +255,7 @@ int8_t acquire_ACC_Values(void)
         rslt = bmi160_extract_accel(accel_data, &acc_inst, &bmi);
         if (rslt != BMI160_OK)
         {
-            printf("Error extracting accel data - %d\n \r", rslt);
+            LOG_DBG("Error extracting accel data - %d\n \r", rslt);
             return rslt;
         }
         
@@ -284,17 +265,19 @@ int8_t acquire_ACC_Values(void)
             readings_buffer[write_index].X_axis = accel_data[j].x;
             readings_buffer[write_index].Y_axis = accel_data[j].y;
             readings_buffer[write_index].Z_axis = accel_data[j].z;
-            write_index++; // incrementa-se o indice do buffer a cada medida
+            write_index++; // increment write index
         }
     }
+
+    return BMI160_OK;
 }
 
 void direct_read(void)
 {
     for (int i = 0; i < MAX_READINGS; i++)
     {
-        printf("%2.6f %2.6f %2.6f \n", ((double)readings_buffer[i].X_axis) / AC
-                                     , ((double)readings_buffer[i].Y_axis) / AC
-                                     , ((double)readings_buffer[i].Z_axis) / AC);
+        LOG_DBG("%2.6f %2.6f %2.6f \n\r", ((float)readings_buffer[i].X_axis) / AC
+                                     , ((float)readings_buffer[i].Y_axis) / AC
+                                     , ((float)readings_buffer[i].Z_axis) / AC);
     }
 }
