@@ -71,7 +71,7 @@ static uint8_t indicate_htm;
 static uint8_t indicating;
 static struct bt_gatt_indicate_params ind_params;
 
-#define READINGS_PER_INDICATE 4
+#define READINGS_PER_INDICATE 2
 
 int indicate_index;
 

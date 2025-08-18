@@ -136,8 +136,8 @@ int main(void)
         t1 = k_uptime_get();
         rslt = acquire_ACC_Values();
         t2 = k_uptime_get();
-        //direct_read();
-        LOG_DBG("time: %d \n\r", t2 - t1);
+        direct_read();
+        printf("time: %d \n\r", t2 - t1);
     }
 out_error:
     while (1)
@@ -276,7 +276,7 @@ void direct_read(void)
 {
     for (int i = 0; i < MAX_READINGS; i++)
     {
-        LOG_DBG("%2.6f %2.6f %2.6f \n\r", ((float)readings_buffer[i].X_axis) / AC
+        printf("%2.6f %2.6f %2.6f \n\r", ((float)readings_buffer[i].X_axis) / AC
                                      , ((float)readings_buffer[i].Y_axis) / AC
                                      , ((float)readings_buffer[i].Z_axis) / AC);
     }
