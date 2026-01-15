@@ -36,7 +36,7 @@ you should:
     > pip install west
   - Initialize the workspace directory (``zephyrproject``), which will contain
     the `pulga-zephyr` repository, and the Zephyr source code:
-    > west init -m https://github.com/caninos-loucos/pulga-zephyr --mr main ./\
+    > west init -m https://github.com/caninos-loucos/pulga-zephyr-turbine --mr main ./\
     > west update
   - Export a Zephyr CMake package for building Zephyr applications:
     > west zephyr-export
