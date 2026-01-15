@@ -16,7 +16,7 @@
 		compatible = "bosch,bmi160";
 		reg = <0x69>;
 		int-gpios = <&gpio0 16 GPIO_ACTIVE_LOW>;
-		status = "okay";
+		status = "disabled";
 	};
 
 	/*Umidity, Pressure and Temperature Sensor*/
