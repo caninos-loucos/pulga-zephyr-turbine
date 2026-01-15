@@ -13,7 +13,7 @@ manifest:
   projects:
     - name: zephyr
       remote: caninos
-      revision: 93cb2c2c5344641cf66b05390f8e1aea0e4658fc
+      revision: Turbine_temp
       import:
         # By using name-allowlist we can clone only the modules that are
         # strictly needed by the application.
