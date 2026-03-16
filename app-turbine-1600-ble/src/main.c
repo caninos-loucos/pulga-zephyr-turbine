@@ -4,6 +4,7 @@
 #include <zephyr/drivers/i2c.h>
 
 #include <zephyr/types.h>
+#include <zephyr/sys/util.h>
 #include <stddef.h>
 #include <string.h>
 #include <errno.h>
@@ -14,6 +15,7 @@
 
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/byteorder.h>
+#include <zephyr/sys/reboot.h>
 #include <zephyr/kernel.h>
 
 #include <zephyr/bluetooth/bluetooth.h>
@@ -32,7 +34,7 @@ LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 
 /* Macros for frames to be read */
 
-#define ACC_FRAMES 50 /* 40 Frames are available every 25ms @ 1600 Hz */
+#define ACC_FRAMES 50 /* 50 Frames are available every 31,25ms @ 1600 Hz */
 /* 50 frames containing a 1 byte header, 6 bytes of accelerometer,
  * This results in 7 bytes per frame*/
 #define FIFO_SIZE 350
@@ -113,11 +115,11 @@ void user_delay(uint32_t period)
 
 #define STR_ANSWER_BUFFER_SIZE 4096
 
-static uint8_t indicate_htm;
-static uint8_t indicating;
+static uint8_t bt_connected, bt_advertising;
+static uint8_t indicating, indicate_htm;
 static struct bt_gatt_indicate_params ind_params;
 
-#define READINGS_PER_INDICATE 2
+#define READINGS_PER_INDICATE 40
 
 uint16_t indicate_index;
 
@@ -138,8 +140,7 @@ static void indicate_cb(struct bt_conn *conn,
 
 static void indicate_destroy(struct bt_gatt_indicate_params *params)
 {
-	LOG_DBG("Indication complete\n");
-    k_sleep(K_MSEC(1000));
+	//LOG_DBG("Indication complete\n");
 	indicating = 0U;
     indicate_index++;
 }
@@ -154,7 +155,7 @@ static const struct bt_uuid_128 turb_char_ind_accel_uuid = BT_UUID_INIT_128(TURB
 /* BLE Service Declaration */
 BT_GATT_SERVICE_DEFINE(hts_svc,
 	BT_GATT_PRIMARY_SERVICE(&turb_svc),
-	BT_GATT_CHARACTERISTIC(&turb_char_ind_accel_uuid, BT_GATT_CHRC_INDICATE,
+	BT_GATT_CHARACTERISTIC(&turb_char_ind_accel_uuid.uuid, BT_GATT_CHRC_INDICATE,
 			       BT_GATT_PERM_NONE, NULL, NULL, NULL),
     BT_GATT_CCC(htmc_ccc_cfg_changed,
 		    BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
@@ -162,41 +163,42 @@ BT_GATT_SERVICE_DEFINE(hts_svc,
 
 void hts_indicate(void)
 {
-    if(indicate_htm){
-        while(indicate_index < MAX_READINGS/READINGS_PER_INDICATE){
-            
-            if (indicating) {
-                k_sleep(K_MSEC(5));
-            }
+    while(bt_connected && indicate_htm && indicate_index < MAX_READINGS/READINGS_PER_INDICATE){
 
-            //LOG_DBG("Indication: %d\n", indicate_index);
+        //LOG_DBG("Indication: %d\n", indicate_index);
 
-            static uint8_t indicate_payload[2+6*READINGS_PER_INDICATE];
+        static uint8_t indicate_payload[1+6*READINGS_PER_INDICATE];
 
-            indicate_payload[0] = indicate_index;
-            
-            for(int i = 0; i < READINGS_PER_INDICATE; i++){
-                indicate_payload[2 + 6*i] = readings_buffer[indicate_index*READINGS_PER_INDICATE + i].X_axis;
-                indicate_payload[4 + 6*i] = readings_buffer[indicate_index*READINGS_PER_INDICATE + i].Y_axis;
-                indicate_payload[6 + 6*i] = readings_buffer[indicate_index*READINGS_PER_INDICATE + i].Z_axis;
-            }
+        indicate_payload[0] = indicate_index;
+        
+        memcpy(indicate_payload+1, readings_buffer, 6*READINGS_PER_INDICATE ); // 2 bytes x 3 axis x readings
 
-            ind_params.attr = &hts_svc.attrs[2];
-            ind_params.func = indicate_cb;
-            ind_params.destroy = indicate_destroy;
-            ind_params.data = &indicate_payload;
-            ind_params.len = sizeof(indicate_payload);
+        ind_params.attr = &hts_svc.attrs[2];
+        ind_params.func = indicate_cb;
+        ind_params.destroy = indicate_destroy;
+        ind_params.data = &indicate_payload;
+        ind_params.len = sizeof(indicate_payload);
 
-            if (bt_gatt_indicate(NULL, &ind_params) == 0) {
-                indicating = 1U;
-            }
-            else LOG_DBG("Indication fail A\n\r");
+        if (bt_gatt_indicate(NULL, &ind_params) == 0) {
+            indicating = 1U;
         }
-        indicate_index = 0;
+        else LOG_DBG("Indication fail\n\r");
+
+        while(indicating) {
+            k_sleep(K_USEC(100));
+        }
     }
+    indicate_index = 0;
 }
 
+static void mtu_exchange_cb(struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params)
+{
+	LOG_DBG("%s: MTU exchange %s (%u)\n", __func__, err == 0U ? "successful" : "failed", bt_gatt_get_mtu(conn));
+}
 
+static struct bt_gatt_exchange_params mtu_exchange_params = {
+	.func = mtu_exchange_cb
+};
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -213,13 +215,26 @@ static void connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
 		LOG_ERR("Connection failed, err 0x%02x %s\n", err, bt_hci_err_to_str(err));
+        bt_le_adv_stop();
 	} else {
 		LOG_DBG("Connected\n");
-	}
+
+        bt_connected = 1;
+        
+        LOG_DBG("%s: Current MTU = %u\n", __func__, bt_gatt_get_mtu(conn));
+        
+        LOG_DBG("%s: Will try to exchange MTU...\n", __func__);
+	    err = bt_gatt_exchange_mtu(conn, &mtu_exchange_params);
+	    if (err) {
+		    LOG_DBG("%s: MTU exchange failed (err %d)", __func__, err);
+	    }
+    }
+    bt_advertising = 0;
 }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
+    bt_connected = 0;
 	LOG_DBG("Disconnected, reason 0x%02x %s\n", reason, bt_hci_err_to_str(reason));
 }
 
@@ -232,13 +247,13 @@ static void bt_ready(void)
 {
 	int err;
 
-	LOG_DBG("Bluetooth initialized\n");
-
 	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 	if (err) {
 		LOG_ERR("Advertising failed to start (err %d)\n", err);
 		return;
 	}
+
+    bt_advertising = 1;
 
 	LOG_DBG("Advertising successfully started\n");
 }
@@ -263,9 +278,9 @@ int main(void)
             goto out_error;
         }
 
-    bt_ready();
+    LOG_DBG("Bluetooth initialized\n");
 
-    //LOG_DBG("BLE MTU: %d \n \r", BLE_ATT_MTU_MAX);
+    bt_ready();
     
     k_sleep(K_MSEC(500));
 
@@ -280,7 +295,7 @@ int main(void)
             LOG_DBG("Error flushing BMI160 FIFO - %d\n \r", rslt);
             goto out_error;
         }
-        LOG_DBG("flush ok");
+        //LOG_DBG("flush ok");
         t1 = k_uptime_get();
         rslt = acquire_ACC_Values();
         t2 = k_uptime_get();
@@ -290,12 +305,18 @@ int main(void)
 
         LOG_DBG("time acq: %d \n\r", t2 - t1);
         LOG_DBG("time indicate: %d \n\r", t3 - t2);
+
+        if(!bt_connected && !bt_advertising)
+        {
+            bt_ready(); //re-enable advertising after disconnect
+        }
     }
 out_error:
     while (1)
     {
-    LOG_DBG("Error \n \r");
-    k_sleep(K_MSEC(500));
+    LOG_DBG("System error, will reset pulga \n \r");
+    k_sleep(K_MSEC(5000));
+    sys_reboot(1);
     }
 }
 
@@ -414,9 +435,7 @@ int8_t acquire_ACC_Values(void)
         
         for (int j = 0; j < acc_inst && write_index < MAX_READINGS; j++)
         {
-            readings_buffer[write_index].X_axis = accel_data[j].x;
-            readings_buffer[write_index].Y_axis = accel_data[j].y;
-            readings_buffer[write_index].Z_axis = accel_data[j].z;
+            memcpy(&readings_buffer[write_index], accel_data, 6); // 2 bytes x 3 axis
             write_index++; // increment write index
         }
     }
@@ -424,7 +443,7 @@ int8_t acquire_ACC_Values(void)
     return BMI160_OK;
 }
 
-void direct_read(void)
+/*void direct_read(void)
 {
     for (int i = 0; i < MAX_READINGS; i++)
     {
@@ -432,4 +451,4 @@ void direct_read(void)
                                      , (readings_buffer[i].Y_axis / AC)
                                      , (readings_buffer[i].Z_axis / AC));
     }
-}
+}*/
