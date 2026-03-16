@@ -358,7 +358,8 @@
 #define BMI160_W_ACCEl_SELF_TEST_FAIL             INT8_C(2)
 
 /** BMX160 unique chip identifier (BMI160 is 0xD1) */
-#define BMI160_CHIP_ID                            UINT8_C(0xD8)
+#define BMI160_CHIP_ID                            UINT8_C(0xD1)
+#define BMX160_CHIP_ID                            UINT8_C(0xD8)
 
 /** Soft reset command */
 #define BMI160_SOFT_RESET_CMD                     UINT8_C(0xb6)
