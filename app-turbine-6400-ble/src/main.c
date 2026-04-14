@@ -213,7 +213,7 @@ void hts_indicate(void)
 
         indicate_payload[0] = indicate_index;
         
-        memcpy(indicate_payload+1, readings_buffer, 6*READINGS_PER_INDICATE ); // 2 bytes x 3 axis x readings
+        memcpy(indicate_payload+1, &readings_buffer[indicate_index*READINGS_PER_INDICATE], 6*READINGS_PER_INDICATE ); // 2 bytes x 3 axis x readings
 
         ind_params.attr = &hts_svc.attrs[2];
         ind_params.func = indicate_cb;
